@@ -8,6 +8,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
+/// Iterate over an OSM PBF file and count the number of features and tags
 pub struct Counter1 {
     /// Input pbf data.
     pbf_file: PathBuf,
@@ -40,6 +41,7 @@ impl ops::AddAssign for Stats {
     }
 }
 
+//noinspection DuplicatedCode
 pub fn run(args: Counter1) -> Result<(), Error> {
     let (sender, receiver) = channel();
 
