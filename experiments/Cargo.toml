@@ -1,0 +1,11 @@
+[package]
+name = "experiments"
+version = "0.1.0"
+authors = ["Yuri Astrakhan <YuriAstrakhan@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.53"
+osmpbf = "0.2.7"
+rayon = "1.5.1"
+structopt = "0.3.26"
