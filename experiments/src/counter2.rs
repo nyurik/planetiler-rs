@@ -36,7 +36,6 @@ enum Mode {
     Geometry,
 }
 
-
 #[derive(Clone, Default, Debug)]
 struct Stats {
     pub count: usize,

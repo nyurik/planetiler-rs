@@ -2,12 +2,12 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::{ops, thread};
 
+use crate::utils::Histogram;
 use anyhow::Error;
 use clap::Parser;
 use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use separator::Separatable;
-use crate::utils::Histogram;
 
 #[derive(Debug, Parser)]
 /// Iterate over an OSM PBF file and count the number of features and tags
@@ -31,16 +31,31 @@ impl Stats {
             ways: 0,
             node_counts: Histogram::new(
                 |v| v.min(50),
-                |v| if v < 50 { v.to_string() } else { "50+".to_string() }),
+                |v| {
+                    if v < 50 {
+                        v.to_string()
+                    } else {
+                        "50+".to_string()
+                    }
+                },
+            ),
             node_distance: Histogram::new(
-                |v| if v <= 1 { 0 } else { (v as f64).log(LOG_BASE).round() as usize },
-                |v| LOG_BASE.powf(v as f64).round().separated_string()),
+                |v| {
+                    if v <= 1 {
+                        0
+                    } else {
+                        (v as f64).log(LOG_BASE).round() as usize
+                    }
+                },
+                |v| LOG_BASE.powf(v as f64).round().separated_string(),
+            ),
         }
     }
 
     pub fn add_way(&mut self, min: i64, max: i64, len: i32) {
-        self.node_counts.add(len as usize);
-        self.node_distance.add(if len < 1 { 0 } else { (max - min) as usize });
+        self.node_counts.add(len as usize, 0);
+        self.node_distance
+            .add(if len < 1 { 0 } else { (max - min) as usize }, len as usize);
         self.ways += 1;
     }
 }
@@ -62,9 +77,12 @@ pub fn run(args: NodeIdDistribution) -> Result<(), Error> {
         while let Ok(v) = receiver.recv() {
             stats += v;
         }
-        println!("Total ways: {:}", stats.ways);
-        stats.node_counts.print("Number of nodes in a way");
-        stats.node_distance.print("Distance between min and max Node ID in a way feature, on a log scale");
+        println!("Total ways: {:}", stats.ways.separated_string());
+        stats.node_counts.print("Number of nodes in a way", false);
+        stats.node_distance.print(
+            "Distance between min and max Node ID in a way feature, on a log scale",
+            true,
+        );
     });
 
     // For each way, find min & max node IDs used, and create a histogram of the int(log(max-min))
