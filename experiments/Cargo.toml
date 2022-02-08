@@ -10,4 +10,5 @@ geos = { version = "8.0.4", features = ["v3_8_0"] }
 osmnodecache = "0.6.0"
 osmpbf = "0.2.7"
 rayon = "1.5.1"
-structopt = "0.3.26"
+separator = "0.4.1"
+clap = { version = "3.0.14", features = ["derive"] }

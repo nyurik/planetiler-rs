@@ -5,14 +5,13 @@ use std::thread;
 use std::time::Instant;
 
 use anyhow::Error;
+use clap::{ArgEnum, Parser};
 use geos::{CoordSeq, GResult, Geom, Geometry};
 use osmnodecache::{CacheStore, DenseFileCache, DenseFileCacheOpts};
 use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use structopt::clap::arg_enum;
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 /// Resolve all ways to their geopoints via node cache, and calculate total bound box.
 /// Assumes nodes stored before ways
 pub struct Counter2 {
@@ -20,7 +19,7 @@ pub struct Counter2 {
     /// * Resolve - Resolve each node ID to lat/lng
     /// * Vector - Create a vector of lat/lng pairs
     /// * Geometry - Create a geometry from vector
-    #[structopt(possible_values = & Mode::variants(), case_insensitive = true)]
+    #[clap(arg_enum)]
     mode: Mode,
 
     /// Input pbf data.
@@ -30,14 +29,13 @@ pub struct Counter2 {
     node_cache: PathBuf,
 }
 
-arg_enum! {
-    #[derive(Debug, Clone, Copy)]
-    enum Mode {
-        Resolve,
-        Vector,
-        Geometry,
-    }
+#[derive(ArgEnum, Debug, Clone, Copy)]
+enum Mode {
+    Resolve,
+    Vector,
+    Geometry,
 }
+
 
 #[derive(Clone, Default, Debug)]
 struct Stats {

@@ -3,11 +3,11 @@ use std::sync::mpsc::channel;
 use std::{ops, thread};
 
 use anyhow::Error;
+use clap::Parser;
 use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 /// Iterate over an OSM PBF file and count the number of features and tags
 pub struct Counter1 {
     /// Input pbf data.
@@ -16,6 +16,7 @@ pub struct Counter1 {
 
 #[derive(Clone, Default, Debug)]
 struct Stats {
+    pub node_max_id: i64,
     pub nodes: usize,
     pub node_tags: usize,
     pub dense_nodes: usize,
@@ -31,6 +32,7 @@ impl ops::AddAssign for Stats {
         *self = Self {
             nodes: self.nodes + other.nodes,
             node_tags: self.node_tags + other.node_tags,
+            node_max_id: self.node_max_id.max(other.node_max_id),
             dense_nodes: self.dense_nodes + other.dense_nodes,
             dense_node_tags: self.dense_node_tags + other.dense_node_tags,
             ways: self.ways + other.ways,
@@ -65,10 +67,12 @@ pub fn run(args: Counter1) -> Result<(), Error> {
                     for node in group.nodes() {
                         stats.nodes += 1;
                         stats.node_tags += node.tags().count();
+                        stats.node_max_id = stats.node_max_id.max(node.id())
                     }
                     for node in group.dense_nodes() {
                         stats.dense_nodes += 1;
                         stats.dense_node_tags += node.tags().count();
+                        stats.node_max_id = stats.node_max_id.max(node.id())
                     }
                     for way in group.ways() {
                         stats.ways += 1;
