@@ -1,11 +1,14 @@
-use std::time::Instant;
-
 use clap::Parser;
 
+use crate::cache_nodes::CacheNodes;
+use crate::chunked_resolver::ChunkedResolver;
+use crate::utils::timed;
 use counter1::Counter1;
 use counter2::Counter2;
 use node_id_dist::NodeIdDistribution;
 
+mod cache_nodes;
+mod chunked_resolver;
 mod counter1;
 mod counter2;
 mod node_id_dist;
@@ -22,22 +25,24 @@ pub struct Opt {
 enum Command {
     Count1(Counter1),
     Count2(Counter2),
+    CacheNodes(CacheNodes),
     NodeDist(NodeIdDistribution),
+    Chunked(ChunkedResolver),
 }
 
 fn main() {
     let opt: Opt = Opt::parse();
-    let start = Instant::now();
+    timed("Complete", || {
+        let res = match opt.cmd {
+            Command::Count1(arg) => counter1::run(arg),
+            Command::Count2(arg) => counter2::run(arg),
+            Command::NodeDist(arg) => node_id_dist::run(arg),
+            Command::CacheNodes(arg) => cache_nodes::run(arg),
+            Command::Chunked(arg) => chunked_resolver::run(arg),
+        };
 
-    let res = match opt.cmd {
-        Command::Count1(arg) => counter1::run(arg),
-        Command::Count2(arg) => counter2::run(arg),
-        Command::NodeDist(arg) => node_id_dist::run(arg),
-    };
-
-    if let Err(v) = res {
-        println!("Error: {v}")
-    }
-
-    println!("Complete in {:.1} seconds", start.elapsed().as_secs_f32());
+        if let Err(v) = res {
+            println!("Error: {v}")
+        }
+    });
 }

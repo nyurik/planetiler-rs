@@ -1,15 +1,16 @@
 use std::ops::AddAssign;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::thread;
-use std::time::Instant;
 
 use anyhow::Error;
 use clap::{ArgEnum, Parser};
 use geos::{CoordSeq, GResult, Geom, Geometry};
-use osmnodecache::{CacheStore, DenseFileCache, DenseFileCacheOpts};
+use osmnodecache::{CacheStore, DenseFileCache};
 use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
+
+use crate::cache_nodes::parse_nodes;
+use crate::utils::{spawn_stats_aggregator, timed};
 
 #[derive(Debug, Parser)]
 /// Resolve all ways to their geopoints via node cache, and calculate total bound box.
@@ -46,6 +47,16 @@ struct Stats {
     pub max_longitude: f64,
 }
 
+impl Stats {
+    fn add_point(&mut self, lat: f64, lng: f64) {
+        self.count += 1;
+        self.min_latitude = self.min_latitude.min(lat);
+        self.max_latitude = self.max_latitude.max(lat);
+        self.min_longitude = self.min_longitude.min(lng);
+        self.max_longitude = self.max_longitude.max(lng);
+    }
+}
+
 impl AddAssign for Stats {
     fn add_assign(&mut self, other: Self) {
         *self = Self {
@@ -59,96 +70,18 @@ impl AddAssign for Stats {
     }
 }
 
-impl AddAssign<(f64, f64)> for Stats {
-    fn add_assign(&mut self, (other_lat, other_lng): (f64, f64)) {
-        *self = Self {
-            count: self.count + 1,
-            errors: self.errors,
-            min_latitude: self.min_latitude.min(other_lat),
-            max_latitude: self.max_latitude.max(other_lat),
-            min_longitude: self.min_longitude.min(other_lng),
-            max_longitude: self.max_longitude.max(other_lng),
-        };
-    }
-}
-
 pub fn run(args: Counter2) -> Result<(), Error> {
-    let start = Instant::now();
-    let res = parse_nodes(&args);
-    println!(
-        "Nodes parsed in {:.1} seconds",
-        start.elapsed().as_secs_f32()
-    );
-    res?;
+    timed("Node cache created", || {
+        parse_nodes(&args.pbf_file, args.node_cache.clone())
+    })?;
 
-    let start = Instant::now();
-    let res = parse_ways(args);
-    println!(
-        "Ways parsed in {:.1} seconds",
-        start.elapsed().as_secs_f32()
-    );
-    res
-}
-
-pub fn parse_nodes(args: &Counter2) -> Result<(), Error> {
-    let cache = DenseFileCacheOpts::new(args.node_cache.clone())
-        .page_size(10 * 1024 * 1024 * 1024)
-        .open()?;
-
-    let (sender, receiver) = channel();
-
-    // This thread will wait for all stats objects and sum them up
-    let stats_collector = thread::spawn(move || {
-        let mut stats = Stats::default();
-        while let Ok(v) = receiver.recv() {
-            stats += v;
-        }
-        println!("Node parsing results: {:#?}", stats);
-    });
-
-    // Read PBF file using multiple threads, and in each thread store node positions into cache
-    BlobReader::from_path(args.pbf_file.clone())?
-        .par_bridge()
-        .for_each_with((cache, sender), |(dfc, sender), blob| {
-            let mut cache = dfc.get_accessor();
-            let mut stats = Stats::default();
-            if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
-                for group in block.groups() {
-                    for node in group.nodes() {
-                        let lat = node.lat();
-                        let lon = node.lon();
-                        cache.set_lat_lon(node.id() as usize, lat, lon);
-                        stats += (lat, lon);
-                    }
-                    for node in group.dense_nodes() {
-                        let lat = node.lat();
-                        let lon = node.lon();
-                        cache.set_lat_lon(node.id() as usize, lat, lon);
-                        stats += (lat, lon);
-                    }
-                }
-            };
-            sender.send(stats).unwrap();
-        });
-
-    stats_collector.join().unwrap();
-
-    Ok(())
+    timed("Ways parsed", || parse_ways(args))
 }
 
 pub fn parse_ways(args: Counter2) -> Result<(), Error> {
     let cache = DenseFileCache::new(args.node_cache)?;
-
     let (sender, receiver) = channel();
-
-    // This thread will wait for all stats objects and sum them up
-    let stats_collector = thread::spawn(move || {
-        let mut stats = Stats::default();
-        while let Ok(v) = receiver.recv() {
-            stats += v;
-        }
-        println!("Ways parsing results: {:#?}", stats);
-    });
+    let stats_collector = spawn_stats_aggregator("Resolved ways", receiver);
 
     // Read PBF file using multiple threads, and in each thread it will
     // decode ways into arrays of points
@@ -164,7 +97,7 @@ pub fn parse_ways(args: Counter2) -> Result<(), Error> {
                         if let Mode::Resolve = mode {
                             for id in way.refs() {
                                 let (lat, lng) = cache.get_lat_lon(id as usize);
-                                stats += (lat as f64, lng as f64)
+                                stats.add_point(lat as f64, lng as f64)
                             }
                             continue;
                         }
@@ -177,7 +110,7 @@ pub fn parse_ways(args: Counter2) -> Result<(), Error> {
                             .collect();
                         if let Mode::Vector = mode {
                             for [lat, lng] in refs {
-                                stats += (lat as f64, lng as f64)
+                                stats.add_point(lat as f64, lng as f64)
                             }
                             continue;
                         }

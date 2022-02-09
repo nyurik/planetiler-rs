@@ -1,7 +1,8 @@
+use std::ops;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::{ops, thread};
 
+use crate::utils::spawn_stats_aggregator;
 use anyhow::Error;
 use clap::Parser;
 use osmpbf::{BlobDecode, BlobReader};
@@ -48,13 +49,7 @@ pub fn run(args: Counter1) -> Result<(), Error> {
     let (sender, receiver) = channel();
 
     // This thread will wait for all stats objects and sum them up
-    let stats_collector = thread::spawn(move || {
-        let mut stats = Stats::default();
-        while let Ok(v) = receiver.recv() {
-            stats += v;
-        }
-        println!("{:#?}", stats);
-    });
+    let stats_collector = spawn_stats_aggregator("Single pass", receiver);
 
     // Read PBF file using multiple threads, and in each thread it will
     // decode blocks, count stats, and send block stats to the channel

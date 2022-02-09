@@ -1,8 +1,9 @@
+use std::fmt::{Debug, Formatter};
+use std::ops;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
-use std::{ops, thread};
 
-use crate::utils::Histogram;
+use crate::utils::{spawn_stats_aggregator, Histogram};
 use anyhow::Error;
 use clap::Parser;
 use osmpbf::{BlobDecode, BlobReader};
@@ -16,7 +17,6 @@ pub struct NodeIdDistribution {
     pbf_file: PathBuf,
 }
 
-#[derive(Debug)]
 struct Stats {
     pub ways: usize,
     pub node_counts: Histogram,
@@ -25,8 +25,8 @@ struct Stats {
 
 const LOG_BASE: f64 = 1.3;
 
-impl Stats {
-    pub fn new() -> Self {
+impl Default for Stats {
+    fn default() -> Self {
         Stats {
             ways: 0,
             node_counts: Histogram::new(
@@ -51,7 +51,36 @@ impl Stats {
             ),
         }
     }
+}
 
+impl Debug for Stats {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Total ways: {:}", self.ways.separated_string()).unwrap();
+        writeln!(
+            f,
+            "{}",
+            self.node_counts
+                .to_string("Number of nodes in a way", false)
+        )
+        .unwrap();
+        writeln!(
+            f,
+            "{}",
+            self.node_distance.to_string(
+                "Distance between min and max Node ID in a way feature, on a log scale",
+                true
+            )
+        )
+        .unwrap();
+        Ok(())
+    }
+}
+// impl Display for Stats{
+// fn default() -> Self {
+// }
+// }
+
+impl Stats {
     pub fn add_way(&mut self, min: i64, max: i64, len: i32) {
         self.node_counts.add(len as usize, 0);
         self.node_distance
@@ -70,26 +99,13 @@ impl ops::AddAssign for Stats {
 
 pub fn run(args: NodeIdDistribution) -> Result<(), Error> {
     let (sender, receiver) = channel();
-
-    // This thread will wait for all stats objects and sum them up
-    let stats_collector = thread::spawn(move || {
-        let mut stats = Stats::new();
-        while let Ok(v) = receiver.recv() {
-            stats += v;
-        }
-        println!("Total ways: {:}", stats.ways.separated_string());
-        stats.node_counts.print("Number of nodes in a way", false);
-        stats.node_distance.print(
-            "Distance between min and max Node ID in a way feature, on a log scale",
-            true,
-        );
-    });
+    let stats_collector = spawn_stats_aggregator("Node distribution", receiver);
 
     // For each way, find min & max node IDs used, and create a histogram of the int(log(max-min))
     BlobReader::from_path(args.pbf_file)?
         .par_bridge()
         .for_each_with(sender, |sender, blob| {
-            let mut stats = Stats::new();
+            let mut stats = Stats::default();
             if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
                 for group in block.groups() {
                     for way in group.ways() {
