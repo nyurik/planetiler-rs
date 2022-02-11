@@ -6,10 +6,11 @@ use anyhow::Error;
 use clap::Parser;
 use geos::{CoordSeq, GResult, Geom, Geometry};
 use osmnodecache::{CacheStore, DenseFileCache};
-use osmpbf::{BlobDecode, BlobReader};
+use osmpbf::{BlobDecode, BlobReader, ByteOffset};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
-use crate::utils::{spawn_stats_aggregator, timed};
+use crate::utils::MemAdvice::{Random, Sequential};
+use crate::utils::{advise_cache, spawn_stats_aggregator, timed, OptAdvice};
 
 #[derive(Debug, Parser)]
 /// Extract ways from OSM PBF file using a node cache.
@@ -20,6 +21,9 @@ pub struct Ways {
 
     /// File for planet-size node cache.
     node_cache: PathBuf,
+
+    #[clap(flatten)]
+    advice: OptAdvice,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -46,17 +50,42 @@ impl AddAssign for Stats {
 }
 
 pub fn run(args: Ways) -> Result<(), Error> {
-    timed("Ways parsed", || parse_ways(args))
+    let (_advice1, advice2) = if args.advice.advice.is_empty() {
+        // By default, use sequential memmap creation, but random during node resolution
+        (
+            OptAdvice {
+                advice: vec![Sequential],
+            },
+            OptAdvice {
+                advice: vec![Random],
+            },
+        )
+    } else {
+        (args.advice.clone(), args.advice.clone())
+    };
+    let first_way_block_offset = 0;
+
+    timed("Ways parsed", || {
+        parse_ways(args, &advice2, first_way_block_offset)
+    })
 }
 
-pub fn parse_ways(args: Ways) -> Result<(), Error> {
-    let cache = DenseFileCache::new(args.node_cache)?;
+pub fn parse_ways(args: Ways, advice: &OptAdvice, starting_offset: u64) -> Result<(), Error> {
+    let cache = DenseFileCache::new(args.node_cache.clone())?;
+    advise_cache(&cache, advice)?;
+
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Resolved ways", receiver);
+    let mut reader = BlobReader::from_path(args.pbf_file)?;
+
+    if starting_offset > 0 {
+        println!("Skipping to offset {starting_offset}");
+        reader.seek(ByteOffset(starting_offset))?;
+    }
 
     // Read PBF file using multiple threads, and in each thread it will
     // decode ways into arrays of points
-    BlobReader::from_path(args.pbf_file)?
+    reader
         .par_bridge()
         .for_each_with((cache, sender), |(dfc, sender), blob| {
             let cache = dfc.get_accessor();
@@ -101,7 +130,6 @@ pub fn parse_ways(args: Ways) -> Result<(), Error> {
 fn to_line(refs: &[[f64; 2]]) -> GResult<Geometry> {
     Geometry::create_line_string(CoordSeq::new_from_vec(refs)?)
 }
-
 
 // struct OsmFeature
 
