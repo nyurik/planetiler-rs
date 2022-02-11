@@ -1,5 +1,6 @@
 use std::ops::AddAssign;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::mpsc::channel;
 
 use crate::utils::{advise_cache, spawn_stats_aggregator, OptAdvice};
@@ -75,20 +76,23 @@ impl AddAssign for Stats {
 }
 
 pub fn run(args: OptsCacheNodes) -> Result<(), Error> {
-    parse_nodes(&args.pbf_file, args.node_cache, &args.advice)
+    parse_nodes(&args.pbf_file, args.node_cache, &args.advice)?;
+    Ok(())
 }
 
+/// Returns offset of the first block with ways or relations
 pub fn parse_nodes(
     pbf_file: &Path,
     node_cache_file: PathBuf,
     advice: &OptAdvice,
-) -> Result<(), Error> {
+) -> Result<u64, Error> {
     let cache = DenseFileCacheOpts::new(node_cache_file)
         .page_size(10 * 1024 * 1024 * 1024)
         .open()?;
 
     advise_cache(&cache, advice)?;
 
+    let first_way_block = AtomicU64::new(u64::MAX);
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Nodes to cache file", receiver);
 
@@ -98,7 +102,9 @@ pub fn parse_nodes(
         |(dfc, sender), blob| {
             let mut cache = dfc.get_accessor();
             let mut stats = Stats::default();
-            if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
+            let blob = blob.unwrap();
+            if let BlobDecode::OsmData(block) = blob.decode().unwrap() {
+                let mut blob_has_ways = false;
                 for group in block.groups() {
                     for node in group.nodes() {
                         let lat = node.lat();
@@ -112,6 +118,13 @@ pub fn parse_nodes(
                         cache.set_lat_lon(node.id() as usize, lat, lon);
                         stats.add_node(node.id(), lat, lon);
                     }
+                    // TBD: is this the quickest way to test for empty?
+                    if group.ways().next().is_some() || group.relations().next().is_some() {
+                        blob_has_ways = true;
+                    }
+                }
+                if blob_has_ways {
+                    first_way_block.fetch_min(blob.offset().unwrap().0, Relaxed);
                 }
             };
             sender.send(stats).unwrap();
@@ -120,5 +133,5 @@ pub fn parse_nodes(
 
     stats_collector.join().unwrap();
 
-    Ok(())
+    Ok(first_way_block.load(Relaxed))
 }

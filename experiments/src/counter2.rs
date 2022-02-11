@@ -6,10 +6,11 @@ use anyhow::Error;
 use clap::{ArgEnum, Parser};
 use geos::{CoordSeq, GResult, Geom, Geometry};
 use osmnodecache::{CacheStore, DenseFileCache};
-use osmpbf::{BlobDecode, BlobReader};
+use osmpbf::{BlobDecode, BlobReader, ByteOffset};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use crate::cache_nodes::parse_nodes;
+use crate::utils::MemAdvice::{Random, Sequential};
 use crate::utils::{advise_cache, spawn_stats_aggregator, timed, OptAdvice};
 
 #[derive(Debug, Parser)]
@@ -72,23 +73,48 @@ impl AddAssign for Stats {
 }
 
 pub fn run(args: OptsCounter2) -> Result<(), Error> {
-    timed("Node cache created", || {
-        parse_nodes(&args.pbf_file, args.node_cache.clone(), &args.advice)
+    let (advice1, advice2) = if args.advice.advice.is_empty() {
+        // By default, use sequential memmap creation, but random during node resolution
+        (
+            OptAdvice {
+                advice: vec![Sequential],
+            },
+            OptAdvice {
+                advice: vec![Random],
+            },
+        )
+    } else {
+        (args.advice.clone(), args.advice.clone())
+    };
+    let first_way_block_offset = timed("Node cache created", || {
+        parse_nodes(&args.pbf_file, args.node_cache.clone(), &advice1)
     })?;
 
-    timed("Ways parsed", || parse_ways(args))
+    timed("Ways parsed", || {
+        parse_ways(args, &advice2, first_way_block_offset)
+    })
 }
 
-pub fn parse_ways(args: OptsCounter2) -> Result<(), Error> {
-    let cache = DenseFileCache::new(args.node_cache)?;
-    advise_cache(&cache, &args.advice)?;
+pub fn parse_ways(
+    args: OptsCounter2,
+    advice: &OptAdvice,
+    starting_offset: u64,
+) -> Result<(), Error> {
+    let cache = DenseFileCache::new(args.node_cache.clone())?;
+    advise_cache(&cache, advice)?;
 
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Resolved ways", receiver);
+    let mut reader = BlobReader::from_path(args.pbf_file)?;
+
+    if starting_offset > 0 {
+        println!("Skipping to offset {starting_offset}");
+        reader.seek(ByteOffset(starting_offset))?;
+    }
 
     // Read PBF file using multiple threads, and in each thread it will
     // decode ways into arrays of points
-    BlobReader::from_path(args.pbf_file)?
+    reader
         .par_bridge()
         .for_each_with((cache, sender), |(dfc, sender), blob| {
             let cache = dfc.get_accessor();

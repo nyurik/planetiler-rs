@@ -200,7 +200,7 @@ impl From<MemAdvice> for Advice {
     }
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 pub struct OptAdvice {
     /// Let OS know how we plan to use the memmap
     #[cfg(unix)]
