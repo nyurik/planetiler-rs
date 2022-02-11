@@ -1,3 +1,9 @@
+# Requirements
+
+```bash
+sudo apt install libgeos-dev
+```
+
 # Basic one-pass statistics
 Simple single pass counter, decodes planet file without resolving node ID -> position. Counts the number of features and the number of tags each feature has.
 

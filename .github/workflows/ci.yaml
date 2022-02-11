@@ -44,6 +44,10 @@ jobs:
     name: Run cargo test
     runs-on: ubuntu-latest
     steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install libgeos-dev -y
       - name: Checkout sources
         uses: actions/checkout@v2
       - name: Install toolchain
@@ -69,6 +73,10 @@ jobs:
     name: Run cargo bench
     runs-on: ubuntu-latest
     steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install libgeos-dev -y
       - name: Checkout sources
         uses: actions/checkout@v2
       - name: Install nightly toolchain
