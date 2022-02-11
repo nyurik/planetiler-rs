@@ -101,3 +101,19 @@ pub fn parse_ways(args: Ways) -> Result<(), Error> {
 fn to_line(refs: &[[f64; 2]]) -> GResult<Geometry> {
     Geometry::create_line_string(CoordSeq::new_from_vec(refs)?)
 }
+
+
+// struct OsmFeature
+
+// fn extract_way(profile, cache, group) -> OsmFeature
+
+// struct OsmFeatureReader;
+
+// let mut osm = OsmFeatureReader::open(pbf_fn)?;
+// osm.set_profile(profile);
+// //osm.select_bbox(8.8, 47.2, 9.5, 55.3)?
+// while let Some(feature) = osm.next()? {
+//     let _layer = feature.layer()?;
+//     let _props = feature.properties()?;
+//     let _geometry = feature.geometry().unwrap();
+// }
