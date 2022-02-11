@@ -2,7 +2,8 @@
 Simple single pass counter, decodes planet file without resolving node ID -> position. Counts the number of features and the number of tags each feature has.
 
 ```bash
-RUSTFLAGS='-Ctarget-cpu=native' cargo run --release count1 planet.osm.pbf
+# Use count1a or count1b for different PBF parsers
+RUSTFLAGS='-Ctarget-cpu=native' cargo run --release count1a planet.osm.pbf
 ```
 
 # Two-pass Way Nodes Resolution
