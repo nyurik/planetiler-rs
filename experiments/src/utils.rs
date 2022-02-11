@@ -1,3 +1,5 @@
+use clap::ArgEnum;
+use osmnodecache::Advice;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::ops::AddAssign;
@@ -122,4 +124,71 @@ pub fn spawn_stats_aggregator<T: 'static + Default + AddAssign + Debug + Send>(
         }
         println!("{} results: {:#?}", msg, stats);
     })
+}
+
+#[repr(i32)]
+#[derive(Debug, ArgEnum, Clone, Copy)]
+pub enum MemAdvice {
+    Normal,
+    Random,
+    Sequential,
+    WillNeed,
+    DontNeed,
+    #[cfg(target_os = "linux")]
+    Free,
+    #[cfg(target_os = "linux")]
+    Remove,
+    #[cfg(target_os = "linux")]
+    DontFork,
+    #[cfg(target_os = "linux")]
+    DoFork,
+    #[cfg(target_os = "linux")]
+    Mergeable,
+    #[cfg(target_os = "linux")]
+    Unmergeable,
+    #[cfg(target_os = "linux")]
+    HugePage,
+    #[cfg(target_os = "linux")]
+    NoHugePage,
+    #[cfg(target_os = "linux")]
+    DontDump,
+    #[cfg(target_os = "linux")]
+    DoDump,
+    #[cfg(target_os = "linux")]
+    HwPoison,
+}
+
+#[cfg(unix)]
+impl From<MemAdvice> for Advice {
+    fn from(value: MemAdvice) -> Self {
+        match value {
+            MemAdvice::Normal => Advice::Normal,
+            MemAdvice::Random => Advice::Random,
+            MemAdvice::Sequential => Advice::Sequential,
+            MemAdvice::WillNeed => Advice::WillNeed,
+            MemAdvice::DontNeed => Advice::DontNeed,
+            #[cfg(target_os = "linux")]
+            MemAdvice::Free => Advice::Free,
+            #[cfg(target_os = "linux")]
+            MemAdvice::Remove => Advice::Remove,
+            #[cfg(target_os = "linux")]
+            MemAdvice::DontFork => Advice::DontFork,
+            #[cfg(target_os = "linux")]
+            MemAdvice::DoFork => Advice::DoFork,
+            #[cfg(target_os = "linux")]
+            MemAdvice::Mergeable => Advice::Mergeable,
+            #[cfg(target_os = "linux")]
+            MemAdvice::Unmergeable => Advice::Unmergeable,
+            #[cfg(target_os = "linux")]
+            MemAdvice::HugePage => Advice::HugePage,
+            #[cfg(target_os = "linux")]
+            MemAdvice::NoHugePage => Advice::NoHugePage,
+            #[cfg(target_os = "linux")]
+            MemAdvice::DontDump => Advice::DontDump,
+            #[cfg(target_os = "linux")]
+            MemAdvice::DoDump => Advice::DoDump,
+            #[cfg(target_os = "linux")]
+            MemAdvice::HwPoison => Advice::HwPoison,
+        }
+    }
 }

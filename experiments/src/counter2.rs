@@ -10,12 +10,10 @@ use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use crate::cache_nodes::parse_nodes;
-use crate::utils::{spawn_stats_aggregator, timed};
+use crate::utils::{spawn_stats_aggregator, timed, MemAdvice};
 
 #[derive(Debug, Parser)]
-/// Resolve all ways to their geopoints via node cache, and calculate total bound box.
-/// Assumes nodes stored before ways
-pub struct Counter2 {
+pub struct OptsCounter2 {
     /// What operations should be done with ways
     /// * Resolve - Resolve each node ID to lat/lng
     /// * Vector - Create a vector of lat/lng pairs
@@ -28,6 +26,15 @@ pub struct Counter2 {
 
     /// File for planet-size node cache.
     node_cache: PathBuf,
+
+    /// Let OS know how we plan to use the memmap
+    #[cfg(unix)]
+    #[clap(short, long, arg_enum)]
+    advice: Vec<MemAdvice>,
+
+    #[cfg(not(unix))]
+    #[clap(skip = Vec::new())]
+    advice: Vec<MemAdvice>,
 }
 
 #[derive(ArgEnum, Debug, Clone, Copy)]
@@ -70,15 +77,15 @@ impl AddAssign for Stats {
     }
 }
 
-pub fn run(args: Counter2) -> Result<(), Error> {
+pub fn run(args: OptsCounter2) -> Result<(), Error> {
     timed("Node cache created", || {
-        parse_nodes(&args.pbf_file, args.node_cache.clone())
+        parse_nodes(&args.pbf_file, args.node_cache.clone(), &args.advice)
     })?;
 
     timed("Ways parsed", || parse_ways(args))
 }
 
-pub fn parse_ways(args: Counter2) -> Result<(), Error> {
+pub fn parse_ways(args: OptsCounter2) -> Result<(), Error> {
     let cache = DenseFileCache::new(args.node_cache)?;
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Resolved ways", receiver);

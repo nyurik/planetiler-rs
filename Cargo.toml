@@ -3,3 +3,7 @@
 members = [
     "experiments",
 ]
+
+[patch.crates-io]
+#osmnodecache = { path = "../../sophox/sophox-rust/osm-node-cache" }
+#memmap2 = { path = "../../rust/memmap2-rs" }

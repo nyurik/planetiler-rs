@@ -11,8 +11,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use separator::Separatable;
 
 #[derive(Debug, Parser)]
-/// Iterate over an OSM PBF file and count the number of features and tags
-pub struct NodeIdDistribution {
+pub struct OptsNodeIdDistribution {
     /// Input pbf data.
     pbf_file: PathBuf,
 }
@@ -97,7 +96,7 @@ impl ops::AddAssign for Stats {
     }
 }
 
-pub fn run(args: NodeIdDistribution) -> Result<(), Error> {
+pub fn run(args: OptsNodeIdDistribution) -> Result<(), Error> {
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Node distribution", receiver);
 

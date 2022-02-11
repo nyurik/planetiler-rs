@@ -1,5 +1,5 @@
 use std::ops::AddAssign;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::channel;
 
@@ -16,9 +16,7 @@ use separator::Separatable;
 use crate::utils::spawn_stats_aggregator;
 
 #[derive(Debug, Parser)]
-/// Resolve all ways to their geopoints via node cache, and calculate total bound box.
-/// Assumes nodes stored before ways
-pub struct ChunkedResolver {
+pub struct OptsChunkedResolver {
     #[clap(arg_enum)]
     /// Skip - ignore ways whose IDs didn't fit into slice
     mode: Mode,
@@ -79,7 +77,7 @@ impl AddAssign for Stats {
     }
 }
 
-pub fn run(args: ChunkedResolver) -> Result<(), Error> {
+pub fn run(args: OptsChunkedResolver) -> Result<(), Error> {
     let cache = DenseFileCache::new(args.node_cache)?;
     let mut start_idx = 0;
     let chunk_size = (args.mem_slice * 1024 * 1024 * 1024 / 8) as i64;
@@ -93,15 +91,7 @@ pub fn run(args: ChunkedResolver) -> Result<(), Error> {
                 (start_idx + chunk_size).separated_string()
             )
             .as_str(),
-            || {
-                run_one_pass(
-                    &cache,
-                    &args.pbf_file,
-                    &max_node_id,
-                    start_idx,
-                    chunk_size,
-                )
-            },
+            || run_one_pass(&cache, &args.pbf_file, &max_node_id, start_idx, chunk_size),
         )?;
         start_idx += chunk_size;
     }
@@ -111,7 +101,7 @@ pub fn run(args: ChunkedResolver) -> Result<(), Error> {
 
 fn run_one_pass(
     cache: &DenseFileCache,
-    pbf_file: &PathBuf,
+    pbf_file: &Path,
     shared_max_node_id: &AtomicI64,
     start_idx: i64,
     chunk_size: i64,
