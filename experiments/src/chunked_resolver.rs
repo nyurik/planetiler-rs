@@ -1,19 +1,19 @@
 use std::ops::AddAssign;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 
 use crate::timed;
 use anyhow::Error;
 use clap::{ArgEnum, Parser};
 use osmnodecache::{CacheStore, DenseFileCache};
-use osmpbf::{BlobDecode, BlobReader};
+use osmpbf::{BlobDecode, BlobReader, ByteOffset};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use separator::Separatable;
 
 // use geos::{CoordSeq, GResult, Geom, Geometry};
 
-use crate::utils::spawn_stats_aggregator;
+use crate::utils::{advise_cache, spawn_stats_aggregator, OptAdvice};
 
 #[derive(Debug, Parser)]
 pub struct OptsChunkedResolver {
@@ -31,6 +31,9 @@ pub struct OptsChunkedResolver {
     /// Example: value 1 will process node IDs in the range 0..1*1024*1024*1024/8-1 in the first iteration,
     /// followed by 1*1024*1024*1024/8..2*1024*1024*1024/8-1, etc.
     mem_slice: usize,
+
+    #[clap(flatten)]
+    advice: OptAdvice,
 }
 
 #[derive(ArgEnum, Debug, Clone, Copy)]
@@ -43,6 +46,7 @@ struct Stats {
     pub ways_viewed: usize,
     pub ways_resolved: usize,
     pub nodes_resolved: usize,
+    pub empty_ways: usize,
     pub errors: usize,
     pub skipped: usize,
     pub min_latitude: f64,
@@ -67,6 +71,7 @@ impl AddAssign for Stats {
             ways_viewed: self.ways_viewed + other.ways_viewed,
             ways_resolved: self.ways_resolved + other.ways_resolved,
             nodes_resolved: self.nodes_resolved + other.nodes_resolved,
+            empty_ways: self.empty_ways + other.empty_ways,
             errors: self.errors + other.errors,
             skipped: self.skipped + other.skipped,
             min_latitude: self.min_latitude + other.min_latitude,
@@ -79,9 +84,11 @@ impl AddAssign for Stats {
 
 pub fn run(args: OptsChunkedResolver) -> Result<(), Error> {
     let cache = DenseFileCache::new(args.node_cache)?;
+    advise_cache(&cache, &args.advice)?;
     let mut start_idx = 0;
     let chunk_size = (args.mem_slice * 1024 * 1024 * 1024 / 8) as i64;
     let max_node_id = AtomicI64::new(0);
+    let first_way_block = AtomicU64::new(u64::MAX);
 
     while start_idx <= max_node_id.load(Ordering::Relaxed) {
         timed(
@@ -91,7 +98,16 @@ pub fn run(args: OptsChunkedResolver) -> Result<(), Error> {
                 (start_idx + chunk_size).separated_string()
             )
             .as_str(),
-            || run_one_pass(&cache, &args.pbf_file, &max_node_id, start_idx, chunk_size),
+            || {
+                run_one_pass(
+                    &cache,
+                    &args.pbf_file,
+                    &max_node_id,
+                    &first_way_block,
+                    start_idx,
+                    chunk_size,
+                )
+            },
         )?;
         start_idx += chunk_size;
     }
@@ -103,30 +119,52 @@ fn run_one_pass(
     cache: &DenseFileCache,
     pbf_file: &Path,
     shared_max_node_id: &AtomicI64,
+    first_way_block: &AtomicU64,
     start_idx: i64,
     chunk_size: i64,
 ) -> Result<(), Error> {
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Chunked parser", receiver);
-    BlobReader::from_path(pbf_file)?.par_bridge().for_each_with(
-        (cache, sender),
-        |(dfc, sender), blob| {
-            if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
+    let mut reader = BlobReader::from_path(pbf_file)?;
+
+    let read_from = first_way_block.load(Ordering::Relaxed);
+    if read_from < u64::MAX {
+        println!("Skipping to offset {read_from}");
+        reader.seek(ByteOffset(read_from)).unwrap();
+    }
+
+    reader
+        .par_bridge()
+        .for_each_with((cache, sender), |(dfc, sender), blob| {
+            let blob = blob.unwrap();
+            if let BlobDecode::OsmData(block) = blob.decode().unwrap() {
                 let cache = dfc.get_accessor();
                 let mut stats = Stats::default();
                 let mut max_node_id = 0;
                 let last_idx = start_idx + chunk_size;
+                let mut blob_has_ways = false;
                 for group in block.groups() {
-                    'way: for way in group.ways() {
-                        for id in way.refs() {
-                            if id > max_node_id {
-                                max_node_id = id;
+                    for way in group.ways() {
+                        blob_has_ways = true;
+                        // Skip if this way's maximum node ID is outside of our range
+                        match way.refs().max() {
+                            None => {
+                                if start_idx == 0 {
+                                    // handle empty ways on the first pass
+                                    stats.empty_ways += 1;
+                                }
                             }
-                            if id < start_idx || id >= last_idx {
-                                stats.ways_viewed += 1;
-                                continue 'way;
+                            Some(last_node_id) => {
+                                if last_node_id > max_node_id {
+                                    max_node_id = last_node_id;
+                                }
+                                if last_node_id < start_idx || last_node_id >= last_idx {
+                                    stats.ways_viewed += 1;
+                                    continue;
+                                }
                             }
                         }
+
                         for id in way.refs() {
                             let (lat, lng) = cache.get_lat_lon(id as usize);
                             stats.add_point(lat, lng)
@@ -171,10 +209,12 @@ fn run_one_pass(
                     }
                 }
                 shared_max_node_id.fetch_max(max_node_id, Ordering::Relaxed);
+                if blob_has_ways {
+                    first_way_block.fetch_min(blob.offset().unwrap().0, Ordering::Relaxed);
+                }
                 sender.send(stats).unwrap();
             };
-        },
-    );
+        });
     stats_collector.join().unwrap();
     Ok(())
 }

@@ -2,10 +2,10 @@ use std::ops::AddAssign;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 
-use crate::utils::{spawn_stats_aggregator, MemAdvice};
+use crate::utils::{advise_cache, spawn_stats_aggregator, OptAdvice};
 use anyhow::Error;
 use clap::Parser;
-use osmnodecache::{Advice, CacheStore, DenseFileCacheOpts};
+use osmnodecache::{CacheStore, DenseFileCacheOpts};
 use osmpbf::{BlobDecode, BlobReader};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
@@ -17,14 +17,8 @@ pub struct OptsCacheNodes {
     /// File for planet-size node cache.
     node_cache: PathBuf,
 
-    /// Let OS know how we plan to use the memmap
-    #[cfg(unix)]
-    #[clap(short, long, arg_enum)]
-    advice: Vec<MemAdvice>,
-
-    #[cfg(not(unix))]
-    #[clap(skip = Vec::new())]
-    advice: Vec<MemAdvice>,
+    #[clap(flatten)]
+    advice: OptAdvice,
 }
 
 #[derive(Clone, Debug)]
@@ -81,24 +75,19 @@ impl AddAssign for Stats {
 }
 
 pub fn run(args: OptsCacheNodes) -> Result<(), Error> {
-    parse_nodes(&args.pbf_file, args.node_cache, args.advice.as_slice())
+    parse_nodes(&args.pbf_file, args.node_cache, &args.advice)
 }
 
 pub fn parse_nodes(
     pbf_file: &Path,
     node_cache_file: PathBuf,
-    #[cfg(unix)] advice: &[MemAdvice],
+    advice: &OptAdvice,
 ) -> Result<(), Error> {
     let cache = DenseFileCacheOpts::new(node_cache_file)
         .page_size(10 * 1024 * 1024 * 1024)
         .open()?;
 
-    #[cfg(unix)]
-    for advice in advice {
-        cache
-            .advise(Advice::try_from(*advice)?)
-            .unwrap_or_else(|v| println!("Unable set {advice:?}: {v}"));
-    }
+    advise_cache(&cache, advice)?;
 
     let (sender, receiver) = channel();
     let stats_collector = spawn_stats_aggregator("Nodes to cache file", receiver);

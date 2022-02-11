@@ -1,5 +1,6 @@
-use clap::ArgEnum;
-use osmnodecache::Advice;
+use anyhow::{Context, Error};
+use clap::{ArgEnum, Args};
+use osmnodecache::{Advice, DenseFileCache};
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::ops::AddAssign;
@@ -118,9 +119,15 @@ pub fn spawn_stats_aggregator<T: 'static + Default + AddAssign + Debug + Send>(
     receiver: Receiver<T>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
+        let start = Instant::now();
+        let mut last_report = Instant::now();
         let mut stats = T::default();
         while let Ok(v) = receiver.recv() {
             stats += v;
+            if last_report.elapsed().as_secs() > 60 {
+                println!("{:.1}: {:?}", start.elapsed().as_secs_f32(), stats);
+                last_report = Instant::now();
+            }
         }
         println!("{} results: {:#?}", msg, stats);
     })
@@ -191,4 +198,28 @@ impl From<MemAdvice> for Advice {
             MemAdvice::HwPoison => Advice::HwPoison,
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct OptAdvice {
+    /// Let OS know how we plan to use the memmap
+    #[cfg(unix)]
+    #[clap(short, long, arg_enum)]
+    pub advice: Vec<MemAdvice>,
+
+    #[cfg(not(unix))]
+    #[clap(skip = Vec::new())]
+    advice: Vec<MemAdvice>,
+}
+
+pub fn advise_cache(cache: &DenseFileCache, advice: &OptAdvice) -> Result<(), Error> {
+    #[cfg(unix)]
+    for advice in &advice.advice {
+        let adv = *advice;
+        println!("Advising memmap as {adv:?}");
+        cache
+            .advise(Advice::try_from(adv)?)
+            .with_context(|| format!("Unable set {adv:?}"))?;
+    }
+    Ok(())
 }
