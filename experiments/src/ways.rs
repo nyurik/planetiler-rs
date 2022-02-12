@@ -5,7 +5,7 @@ use std::sync::mpsc::channel;
 use anyhow::Error;
 use clap::Parser;
 use geos::{CoordSeq, GResult, Geom, Geometry};
-use osmnodecache::{CacheStore, DenseFileCache};
+use osmnodecache::{Cache, CacheStore, DenseFileCache};
 use osmpbf::{BlobDecode, BlobReader, ByteOffset};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
@@ -89,37 +89,15 @@ pub fn parse_ways(args: Ways, advice: &OptAdvice, starting_offset: u64) -> Resul
         .par_bridge()
         .for_each_with((cache, sender), |(dfc, sender), blob| {
             let cache = dfc.get_accessor();
-            let mut stats = Stats::default();
+            let mut stats_processor = StatsProcessor::default();
             if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
                 for group in block.groups() {
                     for way in group.ways() {
-                        let refs: Vec<[f64; 2]> = way
-                            .refs()
-                            .map(|id| {
-                                let (lat, lng) = cache.get_lat_lon(id as usize);
-                                [lat as f64, lng as f64]
-                            })
-                            .collect();
-                        match to_line(&refs) {
-                            Ok(geom) => {
-                                let env = geom.envelope().unwrap();
-                                stats += Stats {
-                                    count: 1,
-                                    errors: 0,
-                                    min_latitude: env.get_y_min().unwrap(),
-                                    max_latitude: env.get_y_max().unwrap(),
-                                    min_longitude: env.get_x_min().unwrap(),
-                                    max_longitude: env.get_x_max().unwrap(),
-                                }
-                            }
-                            Err(_) => {
-                                stats.errors += 1;
-                            }
-                        };
+                        stats_processor.process_way(&cache, way);
                     }
                 }
             };
-            sender.send(stats).unwrap();
+            sender.send(stats_processor.stats).unwrap();
         });
 
     stats_collector.join().unwrap();
@@ -127,21 +105,109 @@ pub fn parse_ways(args: Ways, advice: &OptAdvice, starting_offset: u64) -> Resul
     Ok(())
 }
 
+#[derive(Default)]
+struct StatsProcessor {
+    stats: Stats,
+}
+
+impl StatsProcessor {
+    fn process_way<'a>(&mut self, cache: &'a Box<dyn Cache + 'a>, way: osmpbf::Way) {
+        let refs: Vec<[f64; 2]> = way
+            .refs()
+            .map(|id| {
+                let (lat, lng) = cache.get_lat_lon(id as usize);
+                [lat as f64, lng as f64]
+            })
+            .collect();
+        match to_line(&refs) {
+            Ok(geom) => {
+                let env = geom.envelope().unwrap();
+                self.stats += Stats {
+                    count: 1,
+                    errors: 0,
+                    min_latitude: env.get_y_min().unwrap(),
+                    max_latitude: env.get_y_max().unwrap(),
+                    min_longitude: env.get_x_min().unwrap(),
+                    max_longitude: env.get_x_max().unwrap(),
+                }
+            }
+            Err(_) => {
+                self.stats.errors += 1;
+            }
+        };
+    }
+}
+
 fn to_line(refs: &[[f64; 2]]) -> GResult<Geometry> {
     Geometry::create_line_string(CoordSeq::new_from_vec(refs)?)
 }
 
-// struct OsmFeature
+/*
 
-// fn extract_way(profile, cache, group) -> OsmFeature
+## Use case 1: planetiler passes for OpenMaptiles MVT creation
 
-// struct OsmFeatureReader;
+1. osm reader pass 1:
+   - read nodes into node cache
+   - read relations into cache using profile
 
-// let mut osm = OsmFeatureReader::open(pbf_fn)?;
-// osm.set_profile(profile);
-// //osm.select_bbox(8.8, 47.2, 9.5, 55.3)?
-// while let Some(feature) = osm.next()? {
-//     let _layer = feature.layer()?;
-//     let _props = feature.properties()?;
-//     let _geometry = feature.geometry().unwrap();
-// }
+2. osm reader pass 2:
+   - nodes: emit a point source feature
+   - ways:
+     - emit line or polygon feature
+     - cache multipolygon parts
+   - relations: emit multipolygon feature
+
+3. prepare each feature for MVT (1 worker thread per core)
+   - scale to zoom level
+   - simplifiy in screen pixel coordinates
+   - slice geometries on tile borders
+   - fix topology erros
+   - Encode into compact binary format
+
+4. Write tile features to disk (single-threaded worker)
+
+5. Sort features
+
+6. Emit vector tiles
+
+
+## Use case 2: Geo feature extraction point/line/polygon/multipolygon
+
+1. osm reader pass 1:
+  - if node cache doesn't exist:
+      read nodes into node cache using profile filter
+  - read relations into cache using profile filter
+
+2. osm reader pass 2
+
+3. Optional: reproject to destination projection
+
+
+## Use case 3: Complex Geo feature extraction e.g. streets
+
+1. osm reader pass 1
+2. osm reader pass 2
+3. Postprocess features
+   - Build streets from ways
+
+
+## Use case 4: POI extraction
+
+1. osm reader pass 1
+2. osm reader pass 2
+3. Postprocess features
+   - Emit POIs
+
+
+## Use case 5: Routing network extraction e.g. railway tracks
+
+1. osm reader pass 1
+2. osm reader pass 2
+3. Postprocess features
+   - Build network from ways
+
+More use cases:
+- Statistics
+- Building extraction for 3D rendering
+
+*/
