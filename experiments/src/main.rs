@@ -8,7 +8,7 @@ use crate::utils::timed;
 use counter1_utils::OptsCounter1;
 use counter2::OptsCounter2;
 use node_id_dist::OptsNodeIdDistribution;
-use ways::Ways;
+use way_stats::WayStats;
 
 mod cache_nodes;
 mod chunked_resolver;
@@ -18,7 +18,7 @@ mod counter1b;
 mod counter2;
 mod node_id_dist;
 mod utils;
-mod ways;
+mod way_stats;
 
 #[derive(Debug, Parser)]
 #[clap(name = "experiments", about = "Run one of the performance test.")]
@@ -36,7 +36,9 @@ enum Command {
     /// Resolve all ways to their geopoints via node cache, and calculate total bound box.
     /// Assumes nodes are stored before ways.
     Count2(OptsCounter2),
-    Ways(Ways),
+    /// Resolve all ways to their geopoints via node cache, and calculate total bound box.
+    /// Assumes nodes are stored before ways.
+    WayStats(WayStats),
     /// Create a node cache
     CacheNodes(OptsCacheNodes),
     /// Iterate over an OSM PBF file and count the number of features and tags
@@ -53,7 +55,7 @@ fn main() {
             Command::Count1a(arg) => counter1a::run(arg),
             Command::Count1b(arg) => counter1b::run(arg),
             Command::Count2(arg) => counter2::run(arg),
-            Command::Ways(arg) => ways::run(arg),
+            Command::WayStats(arg) => way_stats::run(arg),
             Command::NodeDist(arg) => node_id_dist::run(arg),
             Command::CacheNodes(arg) => cache_nodes::run(arg),
             Command::Chunked(arg) => chunked_resolver::run(arg),

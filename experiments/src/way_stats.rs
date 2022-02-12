@@ -15,7 +15,7 @@ use crate::utils::{advise_cache, spawn_stats_aggregator, timed, OptAdvice};
 #[derive(Debug, Parser)]
 /// Extract ways from OSM PBF file using a node cache.
 /// Assumes nodes stored before ways
-pub struct Ways {
+pub struct WayStats {
     /// Input pbf data.
     pbf_file: PathBuf,
 
@@ -49,7 +49,7 @@ impl AddAssign for Stats {
     }
 }
 
-pub fn run(args: Ways) -> Result<(), Error> {
+pub fn run(args: WayStats) -> Result<(), Error> {
     let (_advice1, advice2) = if args.advice.advice.is_empty() {
         // By default, use sequential memmap creation, but random during node resolution
         (
@@ -70,7 +70,7 @@ pub fn run(args: Ways) -> Result<(), Error> {
     })
 }
 
-pub fn parse_ways(args: Ways, advice: &OptAdvice, starting_offset: u64) -> Result<(), Error> {
+pub fn parse_ways(args: WayStats, advice: &OptAdvice, starting_offset: u64) -> Result<(), Error> {
     let cache = DenseFileCache::new(args.node_cache.clone())?;
     advise_cache(&cache, advice)?;
 
