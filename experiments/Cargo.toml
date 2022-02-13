@@ -14,3 +14,4 @@ par-map = "0.1.4"
 rayon = "1.5.1"
 separator = "0.4.1"
 clap = { version = "3.0.14", features = ["derive"] }
+geozero = { version = "0.8.0", features = ["with-geos"] }

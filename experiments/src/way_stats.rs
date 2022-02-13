@@ -4,7 +4,8 @@ use std::sync::mpsc::channel;
 
 use anyhow::Error;
 use clap::Parser;
-use geos::{CoordSeq, GResult, Geom, Geometry};
+use geos::Geom;
+use geozero::geos::GeosWriter;
 use osmnodecache::{Cache, CacheStore, DenseFileCache};
 use osmpbf::{BlobDecode, BlobReader, ByteOffset};
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -89,7 +90,7 @@ pub fn parse_ways(args: WayStats, advice: &OptAdvice, starting_offset: u64) -> R
         .par_bridge()
         .for_each_with((cache, sender), |(dfc, sender), blob| {
             let cache = dfc.get_accessor();
-            let mut stats_processor = StatsProcessor::default();
+            let mut stats_processor = StatsProcessor::new();
             if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
                 for group in block.groups() {
                     for way in group.ways() {
@@ -105,41 +106,55 @@ pub fn parse_ways(args: WayStats, advice: &OptAdvice, starting_offset: u64) -> R
     Ok(())
 }
 
-#[derive(Default)]
-struct StatsProcessor {
+struct StatsProcessor<'a> {
+    geom_writer: GeosWriter<'a>,
     stats: Stats,
 }
 
-impl StatsProcessor {
-    fn process_way<'a>(&mut self, cache: &'a Box<dyn Cache + 'a>, way: osmpbf::Way) {
-        let refs: Vec<[f64; 2]> = way
-            .refs()
-            .map(|id| {
-                let (lat, lng) = cache.get_lat_lon(id as usize);
-                [lat as f64, lng as f64]
-            })
-            .collect();
-        match to_line(&refs) {
-            Ok(geom) => {
-                let env = geom.envelope().unwrap();
-                self.stats += Stats {
-                    count: 1,
-                    errors: 0,
-                    min_latitude: env.get_y_min().unwrap(),
-                    max_latitude: env.get_y_max().unwrap(),
-                    min_longitude: env.get_x_min().unwrap(),
-                    max_longitude: env.get_x_max().unwrap(),
-                }
-            }
-            Err(_) => {
-                self.stats.errors += 1;
-            }
-        };
+impl<'a> StatsProcessor<'a> {
+    fn new() -> Self {
+        StatsProcessor {
+            geom_writer: GeosWriter::new(),
+            stats: Stats::default(),
+        }
     }
 }
 
-fn to_line(refs: &[[f64; 2]]) -> GResult<Geometry> {
-    Geometry::create_line_string(CoordSeq::new_from_vec(refs)?)
+impl<'a> StatsProcessor<'a> {
+    fn process_way(&mut self, cache: &'a Box<dyn Cache + 'a>, way: osmpbf::Way) {
+        OsmGeomProcessor::process_way(cache, way, &mut self.geom_writer);
+        let geom = self.geom_writer.geometry();
+        let env = geom.envelope().unwrap();
+        self.stats += Stats {
+            count: 1,
+            errors: 0,
+            min_latitude: env.get_y_min().unwrap(),
+            max_latitude: env.get_y_max().unwrap(),
+            min_longitude: env.get_x_min().unwrap(),
+            max_longitude: env.get_x_max().unwrap(),
+        }
+    }
+}
+
+struct OsmGeomProcessor;
+
+impl OsmGeomProcessor {
+    fn process_way<'a>(
+        cache: &'a Box<dyn Cache + 'a>,
+        way: osmpbf::Way,
+        processor: &mut dyn geozero::GeomProcessor,
+    ) {
+        let tagged = true;
+        let line_idx = 0;
+        processor
+            .linestring_begin(tagged, way.refs().len(), line_idx)
+            .unwrap();
+        for (idx, node_id) in way.refs().enumerate() {
+            let (lat, lng) = cache.get_lat_lon(node_id as usize);
+            processor.xy(lat, lng, idx).unwrap();
+        }
+        processor.linestring_end(tagged, line_idx).unwrap();
+    }
 }
 
 /*
