@@ -4,10 +4,11 @@ use clap::Parser;
 
 use crate::cache_nodes::OptsCacheNodes;
 use crate::chunked_resolver::OptsChunkedResolver;
+use crate::counter1_utils::OptsCounter1;
+use crate::counter2::OptsCounter2;
+use crate::node_id_dist::OptsNodeIdDistribution;
+use crate::track_tiles::OptsTrackTiles;
 use crate::utils::timed;
-use counter1_utils::OptsCounter1;
-use counter2::OptsCounter2;
-use node_id_dist::OptsNodeIdDistribution;
 
 mod cache_nodes;
 mod chunked_resolver;
@@ -16,6 +17,8 @@ mod counter1a;
 mod counter1b;
 mod counter2;
 mod node_id_dist;
+mod tile_id;
+mod track_tiles;
 mod utils;
 
 #[derive(Debug, Parser)]
@@ -41,6 +44,8 @@ enum Command {
     /// Resolve all ways to their geopoints via node cache, and calculate total bound box.
     /// Assumes nodes are stored before ways.
     Chunked(OptsChunkedResolver),
+    /// Create a disk map with (feature ID -> list of tile IDs). Evaluate how to track which feature exists in which tiles.
+    Track(OptsTrackTiles),
 }
 
 fn main() {
@@ -53,6 +58,7 @@ fn main() {
             Command::NodeDist(arg) => node_id_dist::run(arg),
             Command::CacheNodes(arg) => cache_nodes::run(arg),
             Command::Chunked(arg) => chunked_resolver::run(arg),
+            Command::Track(arg) => track_tiles::run(arg),
         };
 
         if let Err(v) = res {

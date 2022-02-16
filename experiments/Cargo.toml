@@ -6,11 +6,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.53"
+clap = { version = "3.0.14", features = ["derive"] }
 geos = { version = "8.0.4", features = ["v3_8_0"] }
 osmnodecache = "0.7.0"
 osmpbf = "0.2.7"
 osmpbfreader = "0.15.2"
 par-map = "0.1.4"
+rand = "0.8.4"
 rayon = "1.5.1"
 separator = "0.4.1"
-clap = { version = "3.0.14", features = ["derive"] }
+sled = "0.34.7"
