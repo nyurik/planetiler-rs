@@ -18,12 +18,26 @@ pub struct OptsTrackTiles {
 
     /// For each feature ID create random tiles between 1 and this value.
     max_tiles_per_id: u16,
+
+    /// Use DB compression
+    #[clap(short, long)]
+    zip: bool,
+
+    /// Flash every N seconds
+    #[clap(short, long, default_value_t = 10)]
+    flash: u64,
+
+    /// Cache capacity, in MB
+    #[clap(short, long, default_value_t = 1048576)]
+    cache: u64,
 }
 
 pub fn run(args: OptsTrackTiles) -> Result<(), Error> {
     let db = sled::Config::new()
-        .flush_every_ms(Some(10_000))
+        .flush_every_ms(Some(args.flash * 1000))
         .path(args.db_file)
+        .use_compression(args.zip)
+        .cache_capacity(args.cache * 1024)
         .open()?;
     (0..args.batches)
         .collect::<Vec<_>>()
