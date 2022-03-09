@@ -8,11 +8,14 @@ edition = "2021"
 anyhow = "1.0.53"
 clap = { version = "3.0.14", features = ["derive"] }
 geos = { version = "8.0.4", features = ["v3_8_0"] }
-osmnodecache = "0.7.0"
+osmnodecache = { version = "0.7.0", path = "../../../rust/osm-node-cache" }
 osmpbf = "0.2.7"
 osmpbfreader = "0.15.2"
 par-map = "0.1.4"
+pariter = "0.5.1"
 rand = "0.8.4"
 rayon = "1.5.1"
 separator = "0.4.1"
 sled = { version = "0.34.7", features = ["compression"] }
+zerocopy = { version = "0.6.1", features = ["alloc"] }
+num-traits = "0.2"

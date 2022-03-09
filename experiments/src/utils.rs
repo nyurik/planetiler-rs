@@ -223,3 +223,56 @@ pub fn advise_cache(cache: &DenseFileCache, advice: &OptAdvice) -> Result<(), Er
     }
     Ok(())
 }
+
+#[derive(Clone, Debug)]
+pub struct NodeStats {
+    pub node_count: usize,
+    pub min_node_id: i64,
+    pub max_node_id: i64,
+    pub min_latitude: f64,
+    pub max_latitude: f64,
+    pub min_longitude: f64,
+    pub max_longitude: f64,
+}
+
+impl NodeStats {
+    pub fn add_node(&mut self, node_id: i64, lat: f64, lng: f64) {
+        *self = Self {
+            node_count: self.node_count + 1,
+            min_node_id: self.min_node_id.min(node_id),
+            max_node_id: self.max_node_id.max(node_id),
+            min_latitude: self.min_latitude.min(lat),
+            max_latitude: self.max_latitude.max(lat),
+            min_longitude: self.min_longitude.min(lng),
+            max_longitude: self.max_longitude.max(lng),
+        };
+    }
+}
+
+impl Default for NodeStats {
+    fn default() -> Self {
+        Self {
+            node_count: 0,
+            min_node_id: i64::MAX,
+            max_node_id: i64::MIN,
+            min_latitude: 0.0,
+            max_latitude: 0.0,
+            min_longitude: 0.0,
+            max_longitude: 0.0,
+        }
+    }
+}
+
+impl AddAssign for NodeStats {
+    fn add_assign(&mut self, other: Self) {
+        *self = Self {
+            node_count: self.node_count + other.node_count,
+            min_node_id: self.min_node_id.min(other.min_node_id),
+            max_node_id: self.max_node_id.max(other.max_node_id),
+            min_latitude: self.min_latitude.min(other.min_latitude),
+            max_latitude: self.max_latitude.max(other.max_latitude),
+            min_longitude: self.min_longitude.min(other.min_longitude),
+            max_longitude: self.max_longitude.max(other.max_longitude),
+        };
+    }
+}
