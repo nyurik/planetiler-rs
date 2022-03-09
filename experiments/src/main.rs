@@ -16,6 +16,7 @@ mod counter1_utils;
 mod counter1a;
 mod counter1b;
 mod counter2;
+pub mod geom_to_mvt;
 mod node_id_dist;
 mod utils;
 mod way_stats;
